@@ -1,23 +1,44 @@
-# GymHappy MCP Installer
+# PushPress MCP Installer
 
-One-command installer for the GymHappy MCP server in Claude Desktop.
+One-command installer for PushPress MCP servers in Claude Desktop.
 
 ## Usage
 
 ```bash
-curl -s https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/install-gymhappy-mcp.py | python3
+curl -s https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/install-mcps.py -o /tmp/install-mcps.py && python3 /tmp/install-mcps.py
 ```
 
-## What it does
+You'll see a menu to choose which MCPs to install:
 
-1. Prompts you for your GymHappy token (get it at https://app.gymhappy.co/super/mcp-token)
-2. Backs up your existing `claude_desktop_config.json`
-3. Adds the `gymhappy-support` MCP server entry
-4. Saves the updated config
+```
+[1] GymHappy Support
+[2] Metabase
+[A] All of the above
+```
 
-No secrets are embedded in this script — your token is entered at runtime and written only to your local config file.
+## Supported MCPs
+
+| MCP | What it does | Requires |
+|-----|-------------|---------|
+| GymHappy Support | Look up gyms, members, reviews, diagnose issues | GymHappy token |
+| Metabase | Query PushPress data, pull metrics | Metabase API key + Node v20+ |
+
+## Getting credentials
+
+**GymHappy:** https://app.gymhappy.co/super/mcp-token
+
+**Metabase:** Message the data team in Slack #support-data:
+> "Hi @data I need a metabase API key for Claude Cowork. Can you send me one?"
+> They'll send it via 1Password.
+
+## Notes
+
+- No secrets are embedded in this script — credentials are entered at runtime
+- Backs up your `claude_desktop_config.json` before writing
+- Safe to re-run (e.g. to add more MCPs later)
+- Metabase requires Node v20+; the installer will auto-detect nvm if needed
 
 ## Requirements
 
 - Python 3
-- Claude Desktop installed
+- Claude Desktop installed and opened at least once
