@@ -5,7 +5,7 @@ One-command installer for the GymHappy MCP server in Claude Desktop.
 ## Usage
 
 ```bash
-curl -s https://raw.githubusercontent.com/YOUR_PUBLIC_REPO/main/install-gymhappy-mcp.py | python3
+curl -s https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/install-gymhappy-mcp.py | python3
 ```
 
 ## What it does
