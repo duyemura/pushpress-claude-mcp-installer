@@ -27,9 +27,7 @@ You'll see a menu to choose which MCPs to install:
 
 **GymHappy:** https://app.gymhappy.co/super/mcp-token
 
-**Metabase:** Message the data team in Slack #support-data:
-> "Hi @data I need a metabase API key for Claude Cowork. Can you send me one?"
-> They'll send it via 1Password.
+**Metabase:** Log into Metabase → click your avatar → Account settings → API Keys → Create API key. Don't have access? Message #support-data in Slack.
 
 ## Notes
 
@@ -42,3 +40,11 @@ You'll see a menu to choose which MCPs to install:
 
 - Python 3
 - Claude Desktop installed and opened at least once
+
+---
+
+## For contributors
+
+`mcps.json` is the machine-readable registry of all supported MCPs. It is read by the [pushpress-team Cowork plugin](https://github.com/duyemura/pushpress-claude-plugin) to check credential status and surface setup instructions. Keep it in sync with `install-mcps.py` — both must agree on supported MCPs and required credentials.
+
+Before committing: verify every MCP in `install-mcps.py` has a matching entry in `mcps.json`, and update this README if supported MCPs change.
