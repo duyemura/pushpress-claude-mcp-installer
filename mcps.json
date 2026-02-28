@@ -1,0 +1,14 @@
+[
+  {
+    "name": "GymHappy Support",
+    "description": "Look up gyms, members, reviews, and diagnose issues",
+    "credentials": ["GYMHAPPY_MCP_TOKEN"],
+    "get_credentials": "https://app.gymhappy.co/super/mcp-token"
+  },
+  {
+    "name": "Metabase",
+    "description": "Query PushPress data and pull live metrics",
+    "credentials": ["METABASE_URL", "METABASE_API_KEY"],
+    "get_credentials": "Log into Metabase → avatar → Account settings → API Keys → Create API key. Need access? Message #support-data in Slack."
+  }
+]
