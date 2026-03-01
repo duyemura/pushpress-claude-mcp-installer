@@ -294,8 +294,30 @@ def find_node_v20():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def prompt(msg):
-    """Read a line from stdin, stripping whitespace. Exits cleanly on Ctrl-C."""
+    """
+    Read a line from the user, stripping whitespace. Exits cleanly on Ctrl-C.
+
+    When the script is piped (e.g. ``curl ... | python3``), stdin carries the
+    script source — not the keyboard. Calling ``input()`` would get EOF
+    immediately and the script would exit before the user can type anything.
+
+    We work around this by opening ``/dev/tty`` directly when stdin is not a
+    real terminal. ``/dev/tty`` always refers to the controlling terminal of
+    the current process, regardless of how stdin is wired up, so the prompt
+    will wait for keyboard input even when the script arrives via a pipe.
+    """
     try:
+        if not sys.stdin.isatty():
+            # stdin is a pipe (e.g. curl ... | python3) — read directly from
+            # the terminal so the user can still type their answer.
+            with open("/dev/tty") as tty:
+                sys.stdout.write(msg)
+                sys.stdout.flush()
+                line = tty.readline()
+                if not line:          # EOF on /dev/tty (no controlling terminal)
+                    print()
+                    sys.exit(0)
+                return line.strip()
         return input(msg).strip()
     except (EOFError, KeyboardInterrupt):
         print()
@@ -504,11 +526,10 @@ def main():
     while True:
         print("Which MCPs would you like to install?\n")
         for key, mcp in MCPS.items():
-            status = (
-                "✅ already installed"
-                if mcp["config_key"] in installed_keys
-                else "not installed"
-            )
+            if mcp["config_key"] in installed_keys:
+                status = "✅ installed  (select to update credentials)"
+            else:
+                status = "⬜ not installed"
             print(f"  [{key}] {mcp['name']} — {status}")
             print(f"       {mcp['description']}\n")
         print("  [A] All PushPress MCPs")
