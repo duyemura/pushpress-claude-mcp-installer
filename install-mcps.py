@@ -41,25 +41,120 @@ import sys
 import subprocess
 
 
-# ── MCP registry ──────────────────────────────────────────────────────────────
-# Add new MCPs here. Each entry needs:
-#   name        — display name shown in the menu
-#   description — one-line description shown under the name
-#   config_key  — the key used in claude_desktop_config.json's "mcpServers" dict
-#                 (must match exactly what the MCP server expects)
+# ── MCP catalog ───────────────────────────────────────────────────────────────
+#
+# MCPs are defined in mcps.json, loaded at startup by load_catalog().
+# To add a new MCP, edit mcps.json only — no Python changes needed.
+#
+# The catalog is loaded from the first available source (in priority order):
+#   1. Local mcps.json next to this script  (dev/clone workflow)
+#   2. Remote GitHub URL                     (curl | python3 workflow)
+#   3. BUNDLED_CATALOG constant below        (offline fallback)
+#
+# Keep BUNDLED_CATALOG in sync with mcps.json when publishing changes.
 
-MCPS = {
-    "1": {
+CATALOG_URL = (
+    "https://raw.githubusercontent.com/"
+    "duyemura/pushpress-claude-mcp-installer/main/mcps.json"
+)
+
+BUNDLED_CATALOG = [
+    {
         "name": "GymHappy Support",
         "description": "Look up gyms, members, reviews, and diagnose issues",
         "config_key": "gymhappy-support",
+        "install": {
+            "strategy": "mcp_remote",
+            "instructions": [
+                "Get your token at: https://app.gymhappy.co/super/mcp-token",
+                "(Log in to GymHappy first if prompted)",
+            ],
+            "credential_prompt": "Paste your GymHappy token (or Enter to skip): ",
+            "url_template": "https://app.gymhappy.co/mcp/support?mcp_token={token}",
+            "url_encode_pipe": True,
+        },
+        "verify": {
+            "strategy": "url_token",
+            "success_codes": ["200", "201", "400", "404", "405", "406"],
+        },
     },
-    "2": {
+    {
         "name": "Metabase",
-        "description": "Query PushPress data and pull metrics directly from Metabase",
+        "description": "Query PushPress data and pull live metrics",
         "config_key": "metabase",
+        "install": {
+            "strategy": "npx_env",
+            "package": "@cognitionai/metabase-mcp-server",
+            "requires_node_v20": True,
+            "instructions": [
+                "To get a Metabase API key:\n",
+                "  1. Open Slack \u2192 #support-data",
+                "  2. Send this message:\n",
+                '       "Hi @data I need a metabase API key for Claude Cowork.',
+                '        Can you send me one?"\n',
+                "     \U0001f4ac https://pushpress.slack.com/channels/support-data\n",
+                "  3. The data team will create a key and send it to you via 1Password.\n",
+            ],
+            "env": [
+                {
+                    "var": "METABASE_URL",
+                    "prompt_user": False,
+                    "default": "https://pushpress.metabaseapp.com/",
+                },
+                {
+                    "var": "METABASE_API_KEY",
+                    "prompt_user": True,
+                    "credential_prompt": "Paste your Metabase API key (or Enter to skip): ",
+                },
+            ],
+        },
+        "verify": {
+            "strategy": "env_api_key",
+            "base_url_var": "METABASE_URL",
+            "api_key_var": "METABASE_API_KEY",
+            "test_path": "/api/user/current",
+            "auth_header": "x-api-key",
+        },
     },
-}
+]
+
+
+def load_catalog():
+    """
+    Load the MCP catalog from the first available source.
+
+    Priority:
+        1. Local mcps.json next to this script (dev/clone workflow).
+           Only possible when the script is run as a file, not piped via stdin.
+        2. Remote catalog at CATALOG_URL fetched via curl.
+        3. BUNDLED_CATALOG constant (always works, even offline).
+
+    Returns a list of MCP definition dicts.
+    """
+    # 1. Local file — __file__ is not defined when piped, so catch NameError
+    try:
+        local_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "mcps.json"
+        )
+        if os.path.exists(local_path):
+            with open(local_path) as f:
+                return json.load(f)
+    except NameError:
+        pass  # __file__ not defined when piped via stdin (curl | python3)
+
+    # 2. Remote catalog
+    try:
+        result = subprocess.run(
+            ["curl", "-sf", "--max-time", "5", CATALOG_URL],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout)
+    except Exception:
+        pass
+
+    # 3. Offline fallback
+    return BUNDLED_CATALOG
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -324,124 +419,235 @@ def prompt(msg):
         sys.exit(0)
 
 
-# ── Individual MCP installers ─────────────────────────────────────────────────
+# ── Install strategies ────────────────────────────────────────────────────────
+#
+# Each strategy function takes (mcp_def, config) and returns True on success.
+# mcp_def is one entry from the catalog; config is the live claude_desktop_config
+# dict (mutated in place on success).
+#
+# To support a new install pattern, add a function here and register it in
+# INSTALL_STRATEGIES — no changes to main() or mcps.json schema needed.
 
-def install_gymhappy(config):
+def _install_mcp_remote(mcp_def, config):
     """
-    Add or update the GymHappy Support MCP entry in config["mcpServers"].
+    Install an MCP whose credential is a token embedded in a URL query param,
+    launched via ``npx -y mcp-remote <url>``.
 
-    Config entry written:
-        "gymhappy-support": {
-            "command": "npx",
-            "args": ["-y", "mcp-remote", "https://app.gymhappy.co/mcp/support?mcp_token=TOKEN"]
-        }
-
-    Token encoding note:
-        GymHappy tokens are Laravel Sanctum tokens in the format "{id}|{secret}".
-        The pipe character (|) must be percent-encoded as %7C because CloudFront
-        strips Authorization headers, so the token is passed as a query parameter
-        instead — and bare pipes in query strings cause parsing issues on some
-        reverse proxies.
+    Required mcp_def["install"] fields:
+        instructions      — list of instruction strings printed before the prompt
+        credential_prompt — the text used to prompt the user for their token
+        url_template      — URL string containing the literal placeholder {token}
+        url_encode_pipe   — bool; if True, "|" in the token is encoded as "%7C"
     """
-    print("\n── GymHappy Support ──────────────────")
-    print("\nGet your token at: https://app.gymhappy.co/super/mcp-token")
-    print("(Log in to GymHappy first if prompted)\n")
+    inst = mcp_def["install"]
+    config_key = mcp_def["config_key"]
 
-    token = prompt("Paste your GymHappy token (or Enter to skip): ")
+    print(f"\n── {mcp_def['name']} ──────────────────────────")
+    for line in inst.get("instructions", []):
+        print(line)
+    print()
+
+    token = prompt(inst["credential_prompt"])
     if not token:
-        print("⚠️  Skipping GymHappy — no token provided.")
+        print(f"⚠️  Skipping {mcp_def['name']} — no token provided.")
         return False
 
-    # Encode | → %7C before embedding in the URL query string
-    token_encoded = token.replace("|", "%7C")
+    # Encode pipe characters before embedding in the URL query string.
+    # GymHappy tokens are in the format "{id}|{secret}"; bare pipes can cause
+    # parsing issues on some reverse proxies.
+    if inst.get("url_encode_pipe"):
+        token = token.replace("|", "%7C")
 
-    config.setdefault("mcpServers", {})["gymhappy-support"] = {
+    url = inst["url_template"].replace("{token}", token)
+
+    config.setdefault("mcpServers", {})[config_key] = {
         "command": "npx",
-        "args": [
-            "-y",
-            "mcp-remote",
-            f"https://app.gymhappy.co/mcp/support?mcp_token={token_encoded}",
-        ],
+        "args": ["-y", "mcp-remote", url],
     }
-    print("✅  GymHappy added.")
+    print(f"✅  {mcp_def['name']} added.")
     return True
 
 
-def install_metabase(config):
+def _install_npx_env(mcp_def, config):
     """
-    Add or update the Metabase MCP entry in config["mcpServers"].
+    Install an MCP whose credentials live in environment variables,
+    launched via ``npx <package>``.
 
-    Config entry written (system node):
-        "metabase": {
-            "command": "npx",
-            "args": ["@cognitionai/metabase-mcp-server"],
-            "env": {
-                "METABASE_URL": "https://pushpress.metabaseapp.com/",
-                "METABASE_API_KEY": "<key>"
-            }
-        }
-
-    Config entry written (nvm node — adds explicit PATH so Claude Desktop
-    can resolve the npx binary and node_modules even with a minimal $PATH):
-        "metabase": {
-            "command": "/Users/you/.nvm/versions/node/v22.x.x/bin/npx",
-            "args": ["@cognitionai/metabase-mcp-server"],
-            "env": {
-                "METABASE_URL": "https://pushpress.metabaseapp.com/",
-                "METABASE_API_KEY": "<key>",
-                "PATH": "/Users/you/.nvm/.../bin:/usr/local/bin:/usr/bin:/bin:..."
-            }
-        }
-
-    METABASE_URL is hardcoded to the PushPress instance — team members should
-    never need to change this.
+    Required mcp_def["install"] fields:
+        package           — npm package name (e.g. "@vendor/mcp-server")
+        instructions      — list of instruction strings printed before the prompt
+        requires_node_v20 — bool; if True, validates that Node v20+ is present
+        env               — list of env var descriptors:
+                              { var, prompt_user, credential_prompt?, default? }
+                            Variables with prompt_user=True are collected
+                            interactively; others use their "default" value.
     """
-    print("\n── Metabase ──────────────────────────")
-    print("\nTo get a Metabase API key:\n")
-    print("  1. Open Slack → #support-data")
-    print("  2. Send this message:\n")
-    print('       "Hi @data I need a metabase API key for Claude Cowork.')
-    print('        Can you send me one?"\n')
-    print("     💬 https://pushpress.slack.com/channels/support-data\n")
-    print("  3. The data team will create a key and send it to you via 1Password.\n")
+    inst = mcp_def["install"]
+    config_key = mcp_def["config_key"]
 
-    api_key = prompt("Paste your Metabase API key (or Enter to skip): ")
-    if not api_key:
-        print("⚠️  Skipping Metabase — no API key provided.")
-        print("    Run this installer again once you have your key.")
-        return False
+    print(f"\n── {mcp_def['name']} ──────────────────────────")
+    for line in inst.get("instructions", []):
+        print(line)
+    print()
 
-    npx_path, bin_dir = find_node_v20()
-    if npx_path is None:
-        print("\n❌  Metabase MCP requires Node.js v20 or higher, but none was found.")
-        print("    Install Node v20+ via https://nodejs.org or nvm, then re-run.")
-        return False
+    # Collect env vars — prompt for user-supplied ones, apply defaults for rest
+    env = {}
+    for ev in inst.get("env", []):
+        if ev.get("prompt_user"):
+            val = prompt(ev["credential_prompt"])
+            if not val:
+                print(
+                    f"⚠️  Skipping {mcp_def['name']} — "
+                    f"no value provided for {ev['var']}."
+                )
+                print("    Run this installer again once you have your key.")
+                return False
+            env[ev["var"]] = val
+        elif "default" in ev:
+            env[ev["var"]] = ev["default"]
 
-    entry = {
-        "command": npx_path,
-        "args": ["@cognitionai/metabase-mcp-server"],
-        "env": {
-            "METABASE_URL": "https://pushpress.metabaseapp.com/",
-            "METABASE_API_KEY": api_key,
-        },
-    }
+    if inst.get("requires_node_v20"):
+        npx_path, bin_dir = find_node_v20()
+        if npx_path is None:
+            print(
+                f"\n❌  {mcp_def['name']} requires Node.js v20 or higher, "
+                "but none was found."
+            )
+            print("    Install Node v20+ via https://nodejs.org or nvm, then re-run.")
+            return False
+    else:
+        npx_path, bin_dir = "npx", None
 
     if bin_dir:
         # Inject PATH so Claude Desktop (which launches with a stripped environment)
         # can find the nvm-managed npx and any globally-installed node_modules.
         system_path = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        entry["env"]["PATH"] = f"{bin_dir}:{system_path}"
+        env["PATH"] = f"{bin_dir}:{system_path}"
         print(f"ℹ️   Using Node from nvm: {npx_path}")
 
-    config.setdefault("mcpServers", {})["metabase"] = entry
-    print("✅  Metabase added.")
+    config.setdefault("mcpServers", {})[config_key] = {
+        "command": npx_path,
+        "args": [inst["package"]],
+        "env": env,
+    }
+    print(f"✅  {mcp_def['name']} added.")
     return True
 
 
-INSTALLERS = {
-    "1": install_gymhappy,
-    "2": install_metabase,
+INSTALL_STRATEGIES = {
+    "mcp_remote": _install_mcp_remote,
+    "npx_env":    _install_npx_env,
 }
+
+
+def install_mcp(mcp_def, config):
+    """Dispatch to the correct install strategy for this MCP definition."""
+    strategy = mcp_def["install"]["strategy"]
+    fn = INSTALL_STRATEGIES.get(strategy)
+    if fn is None:
+        print(f"❌  Unknown install strategy '{strategy}' for {mcp_def['name']}.")
+        return False
+    return fn(mcp_def, config)
+
+
+# ── Verify strategies ─────────────────────────────────────────────────────────
+#
+# Each strategy function takes (mcp_def, config) and returns (ok: bool, msg: str).
+# A quick network call checks whether the stored credentials are actually working.
+# Errors (timeouts, missing curl, etc.) return ok=False with a descriptive message.
+#
+# To support a new verification pattern, add a function here and register it in
+# VERIFY_STRATEGIES — no changes to main() needed.
+
+def _verify_url_token(mcp_def, config):
+    """
+    Verify an mcp_remote MCP by hitting the URL stored in its config args.
+
+    HTTP 401 means the token was rejected. Any code in success_codes means
+    the server accepted the request (the MCP protocol uses various 4xx codes
+    for non-auth responses, so we can't require 200).
+
+    Required mcp_def["verify"] fields:
+        success_codes — list of HTTP status code strings treated as success
+    """
+    config_key = mcp_def["config_key"]
+    entry = config.get("mcpServers", {}).get(config_key, {})
+    args = entry.get("args", [])
+    url = next((a for a in args if a.startswith("http")), None)
+    if not url:
+        return False, "no URL found in config"
+
+    success_codes = set(mcp_def["verify"].get("success_codes", ["200"]))
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "--max-time", "5", url],
+            capture_output=True, text=True, timeout=10,
+        )
+        code = result.stdout.strip()
+        if code == "401":
+            return False, "token rejected (401)"
+        if code in success_codes:
+            return True, f"connected (HTTP {code})"
+        return False, f"unexpected status {code}"
+    except Exception as e:
+        return False, f"curl error: {e}"
+
+
+def _verify_env_api_key(mcp_def, config):
+    """
+    Verify an npx_env MCP by hitting its API with the stored credentials.
+
+    HTTP 200 = working. HTTP 401 = bad key. Anything else is flagged as
+    unexpected so it surfaces in the menu rather than silently passing.
+
+    Required mcp_def["verify"] fields:
+        base_url_var — name of the env var holding the service base URL
+        api_key_var  — name of the env var holding the API key
+        test_path    — URL path to GET (appended to base_url, e.g. "/api/user/current")
+        auth_header  — HTTP header name for the key (e.g. "x-api-key")
+    """
+    config_key = mcp_def["config_key"]
+    v = mcp_def["verify"]
+    entry = config.get("mcpServers", {}).get(config_key, {})
+    env = entry.get("env", {})
+
+    base_url = env.get(v["base_url_var"], "").rstrip("/")
+    api_key = env.get(v["api_key_var"], "")
+    if not base_url or not api_key:
+        return False, f"missing {v['base_url_var']} or {v['api_key_var']} in config"
+
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "--max-time", "5",
+             "-H", f"{v['auth_header']}: {api_key}",
+             f"{base_url}{v['test_path']}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        code = result.stdout.strip()
+        if code == "200":
+            return True, "connected"
+        if code == "401":
+            return False, "API key rejected (401)"
+        return False, f"unexpected status {code}"
+    except Exception as e:
+        return False, f"curl error: {e}"
+
+
+VERIFY_STRATEGIES = {
+    "url_token":   _verify_url_token,
+    "env_api_key": _verify_env_api_key,
+}
+
+
+def verify_mcp(mcp_def, config):
+    """Dispatch to the correct verify strategy for this MCP definition."""
+    strategy = mcp_def["verify"]["strategy"]
+    fn = VERIFY_STRATEGIES.get(strategy)
+    if fn is None:
+        return False, f"unknown verify strategy: {strategy}"
+    return fn(mcp_def, config)
 
 
 # ── Preview mode helpers ──────────────────────────────────────────────────────
@@ -500,6 +706,11 @@ def print_diff_and_confirm(before, after, config_path):
 def main():
     args = parse_args()
 
+    # Load catalog — local mcps.json > remote GitHub > bundled fallback.
+    # Build the numbered menu dict from whatever catalog we got.
+    catalog = load_catalog()
+    MCPS = {str(i + 1): mcp for i, mcp in enumerate(catalog)}
+
     # ── Header ────────────────────────────────────────────────────────────────
     print("\nPushPress MCP Installer")
     print("=" * 40)
@@ -522,16 +733,41 @@ def main():
     if args.preview:
         print_current_config(config, config_path)
 
+    # ── Verify installed MCPs ─────────────────────────────────────────────────
+    #
+    # For each MCP that appears to be installed (key exists in mcpServers),
+    # run a quick live credential check. Cache the results so we don't hit
+    # the network on every menu redraw.
+    #
+    # An MCP is considered "installed" if its config_key appears in mcpServers,
+    # regardless of whether it was installed by this script or set up manually.
+    mcp_status = {}
+    any_installed = any(mcp["config_key"] in installed_keys for mcp in MCPS.values())
+    if any_installed:
+        print("Checking installed MCPs...", end="", flush=True)
+    for key, mcp_def in MCPS.items():
+        if mcp_def["config_key"] in installed_keys:
+            ok, msg = verify_mcp(mcp_def, config)
+            mcp_status[key] = (True, ok, msg)
+        else:
+            mcp_status[key] = (False, False, "not installed")
+    if any_installed:
+        print(" done.\n")
+
     # ── Menu ──────────────────────────────────────────────────────────────────
     while True:
         print("Which MCPs would you like to install?\n")
-        for key, mcp in MCPS.items():
-            if mcp["config_key"] in installed_keys:
-                status = "✅ installed  (select to update credentials)"
+        for key, mcp_def in MCPS.items():
+            is_installed, is_working, status_msg = mcp_status[key]
+            if is_installed:
+                if is_working:
+                    status = "✅ working  (select to update credentials)"
+                else:
+                    status = f"⚠️  installed but not working: {status_msg}  (select to fix)"
             else:
                 status = "⬜ not installed"
-            print(f"  [{key}] {mcp['name']} — {status}")
-            print(f"       {mcp['description']}\n")
+            print(f"  [{key}] {mcp_def['name']} — {status}")
+            print(f"       {mcp_def['description']}\n")
         print("  [A] All PushPress MCPs")
         print("  [Q] Quit\n")
 
@@ -554,7 +790,7 @@ def main():
     # ── Run installers ────────────────────────────────────────────────────────
     installed_names = []
     for key in selected:
-        if INSTALLERS[key](config):
+        if install_mcp(MCPS[key], config):
             installed_names.append(MCPS[key]["name"])
 
     if not installed_names:

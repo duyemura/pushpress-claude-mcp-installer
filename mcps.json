@@ -2,13 +2,58 @@
   {
     "name": "GymHappy Support",
     "description": "Look up gyms, members, reviews, and diagnose issues",
-    "credentials": ["GYMHAPPY_MCP_TOKEN"],
-    "get_credentials": "https://app.gymhappy.co/super/mcp-token"
+    "config_key": "gymhappy-support",
+    "install": {
+      "strategy": "mcp_remote",
+      "instructions": [
+        "Get your token at: https://app.gymhappy.co/super/mcp-token",
+        "(Log in to GymHappy first if prompted)"
+      ],
+      "credential_prompt": "Paste your GymHappy token (or Enter to skip): ",
+      "url_template": "https://app.gymhappy.co/mcp/support?mcp_token={token}",
+      "url_encode_pipe": true
+    },
+    "verify": {
+      "strategy": "url_token",
+      "success_codes": ["200", "201", "400", "404", "405", "406"]
+    }
   },
   {
     "name": "Metabase",
     "description": "Query PushPress data and pull live metrics",
-    "credentials": ["METABASE_URL", "METABASE_API_KEY"],
-    "get_credentials": "Log into Metabase → avatar → Account settings → API Keys → Create API key. Need access? Message #support-data in Slack."
+    "config_key": "metabase",
+    "install": {
+      "strategy": "npx_env",
+      "package": "@cognitionai/metabase-mcp-server",
+      "requires_node_v20": true,
+      "instructions": [
+        "To get a Metabase API key:\n",
+        "  1. Open Slack → #support-data",
+        "  2. Send this message:\n",
+        "       \"Hi @data I need a metabase API key for Claude Cowork.",
+        "        Can you send me one?\"\n",
+        "     💬 https://pushpress.slack.com/channels/support-data\n",
+        "  3. The data team will create a key and send it to you via 1Password.\n"
+      ],
+      "env": [
+        {
+          "var": "METABASE_URL",
+          "prompt_user": false,
+          "default": "https://pushpress.metabaseapp.com/"
+        },
+        {
+          "var": "METABASE_API_KEY",
+          "prompt_user": true,
+          "credential_prompt": "Paste your Metabase API key (or Enter to skip): "
+        }
+      ]
+    },
+    "verify": {
+      "strategy": "env_api_key",
+      "base_url_var": "METABASE_URL",
+      "api_key_var": "METABASE_API_KEY",
+      "test_path": "/api/user/current",
+      "auth_header": "x-api-key"
+    }
   }
 ]
