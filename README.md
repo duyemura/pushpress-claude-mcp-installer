@@ -5,46 +5,56 @@ One-command installer for PushPress MCP servers in Claude Desktop.
 ## Usage
 
 ```bash
-curl -s https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/install-mcps.py -o /tmp/install-mcps.py && python3 /tmp/install-mcps.py
+curl -fsSL https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/install.sh | bash
 ```
 
-You'll see a menu to choose which MCPs to install:
+That's it. The script handles everything:
+- Installs Node.js v22 if you don't have it (downloads the official macOS installer)
+- Walks you through choosing which MCPs to set up
+- Verifies your credentials before saving
+- Backs up your Claude Desktop config before making changes
 
-```
-[1] GymHappy Support
-[2] Metabase
-[A] All of the above
-```
+No Python, Homebrew, or Xcode needed.
 
 ## Supported MCPs
 
 | MCP | What it does | Requires |
 |-----|-------------|---------|
 | GymHappy Support | Look up gyms, members, reviews, diagnose issues | GymHappy token |
-| Metabase | Query PushPress data, pull metrics | Metabase API key + Node v20+ |
+| Metabase | Query PushPress data, pull metrics | Metabase API key |
 
 ## Getting credentials
 
-**GymHappy:** https://app.gymhappy.co/super/mcp-token
+**GymHappy:** https://app.gymhappy.co/super/mcp-token (log in first if prompted)
 
-**Metabase:** Log into Metabase → click your avatar → Account settings → API Keys → Create API key. Don't have access? Message #support-data in Slack.
+**Metabase:** Message #support-data in Slack — the data team will send you a key via 1Password.
 
 ## Notes
 
 - No secrets are embedded in this script — credentials are entered at runtime
 - Backs up your `claude_desktop_config.json` before writing
-- Safe to re-run (e.g. to add more MCPs later)
-- Metabase requires Node v20+; the installer will auto-detect nvm if needed
+- Safe to re-run (e.g. to add more MCPs or update credentials)
+- Node.js v20+ is auto-detected from system PATH, nvm, or fnm
 
 ## Requirements
 
-- Python 3
+- macOS
 - Claude Desktop installed and opened at least once
+
+## Legacy
+
+The previous Python-based installer (`install-mcps.py`) is still available but deprecated. Use `install.sh` instead.
 
 ---
 
 ## For contributors
 
-`mcps.json` is the machine-readable registry of all supported MCPs. It is read by the [pushpress-team Cowork plugin](https://github.com/duyemura/pushpress-claude-plugin) to check credential status and surface setup instructions. Keep it in sync with `install-mcps.py` — both must agree on supported MCPs and required credentials.
+`mcps.json` is the machine-readable registry of all supported MCPs. It is read by the [pushpress-team Cowork plugin](https://github.com/duyemura/pushpress-claude-plugin) to check credential status and surface setup instructions. Keep it in sync with `install.sh` — both must agree on supported MCPs and required credentials.
 
-Before committing: verify every MCP in `install-mcps.py` has a matching entry in `mcps.json`, and update this README if supported MCPs change.
+### Version history
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 2.0.0 | 2026-03-31 | Rewrote installer as bash script — no Python/Homebrew/Xcode deps, auto-installs Node.js |
+| 1.1.0 | 2026-03-02 | Catalog-driven architecture, mcps.json registry |
+| 1.0.0 | 2026-02-28 | Initial Python installer with GymHappy + Metabase |
