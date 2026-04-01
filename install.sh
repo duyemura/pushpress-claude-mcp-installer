@@ -497,6 +497,64 @@ format_status() {
 gh_display=$(format_status "$gh_status")
 mb_display=$(format_status "$mb_status")
 
+# ── Detailed help for non-technical users ────────────────────────────
+
+show_help() {
+    echo ""
+    echo "================================================================"
+    echo "  DETAILED SETUP GUIDE"
+    echo "================================================================"
+    echo ""
+    echo "  What is this?"
+    echo "  ─────────────"
+    echo "  This installer connects Claude (your AI assistant) to"
+    echo "  PushPress tools so it can help you with real work —"
+    echo "  like looking up gym info or pulling data reports."
+    echo ""
+    echo "  What you'll need"
+    echo "  ────────────────"
+    echo "  Each tool needs a \"key\" (like a password) to connect."
+    echo "  You only need to set this up once."
+    echo ""
+    echo "  GymHappy Support — lets Claude look up gyms, reviews,"
+    echo "    members, and diagnose support issues."
+    echo ""
+    echo "    How to get your key:"
+    echo "      1. Open this link in your browser:"
+    echo "         https://app.gymhappy.co/super/mcp-token"
+    echo "      2. Log in if asked (use your normal GymHappy login)"
+    echo "      3. You'll see a long string of letters and numbers"
+    echo "      4. Select all of it and copy it (Cmd+A, then Cmd+C)"
+    echo "      5. Come back here and paste it (Cmd+V) when asked"
+    echo ""
+    echo "  Metabase — lets Claude query PushPress data and metrics."
+    echo ""
+    echo "    How to get your key:"
+    echo "      1. Open Slack and go to the #support-data channel"
+    echo "         https://pushpress.slack.com/channels/support-data"
+    echo "      2. Send this message:"
+    echo "         \"Hi! I need a Metabase API key for Claude Cowork.\""
+    echo "      3. Someone from the data team will send you a key"
+    echo "         via 1Password (check your 1Password notifications)"
+    echo "      4. Copy the key and paste it here when asked"
+    echo ""
+    echo "  What happens next"
+    echo "  ─────────────────"
+    echo "  After you paste your key(s), this installer will:"
+    echo "    - Verify the key works"
+    echo "    - Save it to Claude Desktop's config"
+    echo "    - You'll need to quit and reopen Claude Desktop"
+    echo ""
+    echo "  If something goes wrong"
+    echo "  ──────────────────────"
+    echo "  - You can run this installer again anytime — it's safe"
+    echo "  - It won't break anything that's already working"
+    echo "  - If you get stuck, ask in #support-data on Slack"
+    echo ""
+    echo "================================================================"
+    echo ""
+}
+
 # Step 5: Interactive menu
 while true; do
     echo ""
@@ -509,6 +567,7 @@ while true; do
     echo "       Query PushPress data and pull live metrics"
     echo ""
     echo "  [A] All PushPress MCPs"
+    echo "  [H] Help — detailed instructions for each step"
     echo "  [Q] Quit"
     echo ""
 
@@ -517,8 +576,9 @@ while true; do
 
     case "$choice" in
         ""|Q) echo "Bye!"; exit 0 ;;
+        H) show_help; continue ;;
         1|2|A) break ;;
-        *) echo "Invalid choice. Pick a number, A, or Q." ;;
+        *) echo "Invalid choice. Pick a number, A, H, or Q." ;;
     esac
 done
 
