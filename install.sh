@@ -246,6 +246,67 @@ do_gymhappy() {
     echo "GymHappy Support configured."
 }
 
+# ── Install: GitHub (PushPress Code) ────────────────────────────────
+
+do_github() {
+    echo ""
+    echo "── GitHub (PushPress Code) ─────────────────"
+    echo ""
+    echo "This gives Claude read-only access to PushPress source code."
+    echo "You'll create a personal token — takes about 60 seconds."
+    echo ""
+    echo "  1. Go to: https://github.com/settings/personal-access-tokens/new"
+    echo "  2. Token name: \"Claude Cowork\" (or anything you'll recognize)"
+    echo "  3. Expiration: 90 days (you can always re-run this to update)"
+    echo "  4. Resource owner: select \"pushpress\" org"
+    echo "  5. Repository access: \"All repositories\" (or pick specific ones)"
+    echo "  6. Permissions -> Repository permissions:"
+    echo "       Contents: Read-only"
+    echo "       Metadata: Read-only"
+    echo "       Pull requests: Read-only"
+    echo "       (leave everything else as \"No access\")"
+    echo "  7. Click \"Generate token\" and copy it"
+    echo ""
+
+    local token
+    token=$(ask "Paste your GitHub token (or Enter to skip): ")
+    [ -z "$token" ] && { echo ""; echo "Skipping GitHub. Re-run this installer when you have a token."; return 1; }
+
+    local result
+    result=$(curl -so /dev/null -w '%{http_code}' --max-time 5 \
+        -H "Authorization: Bearer $token" "https://api.github.com/rate_limit" 2>/dev/null) || result="000"
+    if [ "$result" = "401" ] || [ "$result" = "403" ]; then
+        echo ""
+        echo "Token was rejected ($result). Double-check it and try again."
+        return 1
+    fi
+
+    local entry
+    if [ -n "$NODE_BIN" ]; then
+        echo "Using Node from nvm: $NPX_CMD"
+        entry=$(node -e "console.log(JSON.stringify({
+            command: process.argv[1],
+            args: ['-y', '@modelcontextprotocol/server-github'],
+            env: {
+                GITHUB_PERSONAL_ACCESS_TOKEN: process.argv[2],
+                PATH: process.argv[3] + ':/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+            }
+        }))" "$NPX_CMD" "$token" "$NODE_BIN")
+    else
+        entry=$(node -e "console.log(JSON.stringify({
+            command: process.argv[1],
+            args: ['-y', '@modelcontextprotocol/server-github'],
+            env: {
+                GITHUB_PERSONAL_ACCESS_TOKEN: process.argv[2]
+            }
+        }))" "$NPX_CMD" "$token")
+    fi
+
+    json_set_mcp "github" "$entry"
+    echo ""
+    echo "GitHub configured."
+}
+
 # ── Install: Metabase ───────────────────────────────────────────────
 
 do_metabase() {
@@ -331,6 +392,7 @@ echo "Checking installed MCPs..."
 keys=$(json_mcp_keys)
 gh_status="not installed"
 mb_status="not installed"
+git_status="not installed"
 
 if echo ",$keys," | grep -q ",gymhappy-support,"; then
     gh_url=$(json_get_url "gymhappy-support")
@@ -349,18 +411,27 @@ if echo ",$keys," | grep -q ",metabase,"; then
     fi
 fi
 
-# Format status icons
-case "$gh_status" in
-    working)       gh_display="working  (select to update credentials)" ;;
-    "not working") gh_display="installed but not working  (select to fix)" ;;
-    *)             gh_display="not installed" ;;
-esac
+if echo ",$keys," | grep -q ",github,"; then
+    git_tok=$(json_get_env "github" "GITHUB_PERSONAL_ACCESS_TOKEN")
+    if [ -n "$git_tok" ]; then
+        git_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 \
+            -H "Authorization: Bearer $git_tok" "https://api.github.com/rate_limit" 2>/dev/null) || git_code="000"
+        [ "$git_code" = "200" ] && git_status="working" || git_status="not working"
+    fi
+fi
 
-case "$mb_status" in
-    working)       mb_display="working  (select to update credentials)" ;;
-    "not working") mb_display="installed but not working  (select to fix)" ;;
-    *)             mb_display="not installed" ;;
-esac
+# Format status display
+format_status() {
+    case "$1" in
+        working)       echo "working  (select to update credentials)" ;;
+        "not working") echo "installed but not working  (select to fix)" ;;
+        *)             echo "not installed" ;;
+    esac
+}
+
+gh_display=$(format_status "$gh_status")
+mb_display=$(format_status "$mb_status")
+git_display=$(format_status "$git_status")
 
 # Step 5: Interactive menu
 while true; do
@@ -373,6 +444,9 @@ while true; do
     echo "  [2] Metabase — $mb_display"
     echo "       Query PushPress data and pull live metrics"
     echo ""
+    echo "  [3] GitHub (PushPress Code) — $git_display"
+    echo "       Search and read source code (read-only)"
+    echo ""
     echo "  [A] All PushPress MCPs"
     echo "  [Q] Quit"
     echo ""
@@ -382,7 +456,7 @@ while true; do
 
     case "$choice" in
         ""|Q) echo "Bye!"; exit 0 ;;
-        1|2|A) break ;;
+        1|2|3|A) break ;;
         *) echo "Invalid choice. Pick a number, A, or Q." ;;
     esac
 done
@@ -392,9 +466,11 @@ installed=()
 case "$choice" in
     1) do_gymhappy && installed+=("GymHappy Support") || true ;;
     2) do_metabase && installed+=("Metabase") || true ;;
+    3) do_github && installed+=("GitHub") || true ;;
     A)
         do_gymhappy && installed+=("GymHappy Support") || true
         do_metabase && installed+=("Metabase") || true
+        do_github && installed+=("GitHub") || true
         ;;
 esac
 

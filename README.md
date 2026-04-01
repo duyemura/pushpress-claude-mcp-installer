@@ -22,12 +22,15 @@ No Python, Homebrew, or Xcode needed.
 |-----|-------------|---------|
 | GymHappy Support | Look up gyms, members, reviews, diagnose issues | GymHappy token |
 | Metabase | Query PushPress data, pull metrics | Metabase API key |
+| GitHub (PushPress Code) | Search and read source code (read-only) | GitHub Fine-Grained PAT |
 
 ## Getting credentials
 
 **GymHappy:** https://app.gymhappy.co/super/mcp-token (log in first if prompted)
 
 **Metabase:** Message #support-data in Slack — the data team will send you a key via 1Password.
+
+**GitHub:** Create a [Fine-Grained Personal Access Token](https://github.com/settings/personal-access-tokens/new) scoped to the `pushpress` org with read-only permissions (Contents, Metadata, Pull requests). The installer walks you through it step by step.
 
 ## Notes
 

@@ -55,5 +55,40 @@
       "test_path": "/api/user/current",
       "auth_header": "x-api-key"
     }
+  },
+  {
+    "name": "GitHub (PushPress Code)",
+    "description": "Search and read PushPress source code (read-only)",
+    "config_key": "github",
+    "install": {
+      "strategy": "npx_env",
+      "package": "@modelcontextprotocol/server-github",
+      "requires_node_v20": true,
+      "instructions": [
+        "Create a read-only GitHub token (takes ~60 seconds):\n",
+        "  1. Go to: https://github.com/settings/personal-access-tokens/new",
+        "  2. Token name: \"Claude Cowork\"",
+        "  3. Resource owner: select \"pushpress\" org",
+        "  4. Repository access: All repositories",
+        "  5. Permissions → Contents: Read-only, Metadata: Read-only, Pull requests: Read-only",
+        "  6. Generate token and copy it\n"
+      ],
+      "env": [
+        {
+          "var": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "prompt_user": true,
+          "credential_prompt": "Paste the GitHub token (or Enter to skip): "
+        }
+      ]
+    },
+    "verify": {
+      "strategy": "env_api_key",
+      "base_url_var": null,
+      "api_key_var": "GITHUB_PERSONAL_ACCESS_TOKEN",
+      "test_path": "/rate_limit",
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer ",
+      "base_url": "https://api.github.com"
+    }
   }
 ]
