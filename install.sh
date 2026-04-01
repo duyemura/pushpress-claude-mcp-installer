@@ -93,46 +93,59 @@ find_node() {
 install_node() {
     echo ""
     echo "Node.js v20+ is required but wasn't found on this Mac."
-    echo ""
-    echo "I'll install it now using the official installer from nodejs.org."
-    echo "This will ask for your Mac password (the same one you use to log in)."
+    echo "Installing it now (no password needed)..."
     echo ""
 
-    # Find the latest v22.x LTS .pkg from nodejs.org
-    local pkg
-    pkg=$(curl -fsSL "https://nodejs.org/dist/latest-v22.x/" 2>/dev/null | \
-          grep -oE 'node-v[0-9]+\.[0-9]+\.[0-9]+\.pkg' | head -1)
+    # Detect architecture
+    local arch
+    arch=$(uname -m)
+    if [ "$arch" = "arm64" ]; then
+        local node_arch="arm64"
+    else
+        local node_arch="x64"
+    fi
 
-    if [ -z "$pkg" ]; then
+    # Find the latest v22.x tarball for this architecture
+    local tarball
+    tarball=$(curl -fsSL "https://nodejs.org/dist/latest-v22.x/" 2>/dev/null | \
+              grep -oE "node-v[0-9]+\.[0-9]+\.[0-9]+-darwin-${node_arch}\.tar\.gz" | head -1)
+
+    if [ -z "$tarball" ]; then
         echo "Could not determine the latest Node.js version."
         echo "Please install Node.js v22+ manually from https://nodejs.org"
         exit 1
     fi
 
-    local url="https://nodejs.org/dist/latest-v22.x/$pkg"
-    echo "Downloading $pkg..."
-    curl -fSL --progress-bar "$url" -o /tmp/node-install.pkg
+    local url="https://nodejs.org/dist/latest-v22.x/$tarball"
+    local node_dir="$HOME/.local/node"
 
-    echo ""
-    echo "Installing (enter your Mac password if prompted)..."
-    sudo installer -pkg /tmp/node-install.pkg -target /
-    rm -f /tmp/node-install.pkg
+    echo "Downloading $tarball..."
+    mkdir -p "$node_dir"
+    curl -fSL --progress-bar "$url" | tar -xz --strip-components=1 -C "$node_dir"
 
-    # Make sure node is on PATH
-    export PATH="/usr/local/bin:$PATH"
-    hash -r 2>/dev/null || true
-
-    if ! command -v node &>/dev/null; then
+    if [ ! -x "$node_dir/bin/node" ]; then
         echo ""
-        echo "Node.js was installed but isn't available yet."
-        echo "Close this Terminal window, open a new one, and run this installer again."
+        echo "Download failed. Please install Node.js v22+ manually from https://nodejs.org"
         exit 1
     fi
 
+    # Add to PATH for this session
+    export PATH="$node_dir/bin:$PATH"
+    NPX_CMD="$node_dir/bin/npx"
+    NODE_BIN="$node_dir/bin"
+
+    # Add to shell profile so Claude Desktop and future sessions can find it
+    local shell_rc="$HOME/.zshrc"
+    [ ! -f "$shell_rc" ] && shell_rc="$HOME/.bash_profile"
+    if ! grep -q '.local/node/bin' "$shell_rc" 2>/dev/null; then
+        echo '' >> "$shell_rc"
+        echo '# Node.js (installed by PushPress Cowork setup)' >> "$shell_rc"
+        echo 'export PATH="$HOME/.local/node/bin:$PATH"' >> "$shell_rc"
+    fi
+
     echo ""
-    echo "Node.js $(node -v) installed successfully."
+    echo "Node.js $(node -v) installed to ~/.local/node/"
     echo ""
-    NPX_CMD="npx"
 }
 
 ensure_node() {
