@@ -248,58 +248,116 @@ do_gymhappy() {
 
 # ── Install: GitHub (PushPress Code) ────────────────────────────────
 
+WRAPPER_DIR="$HOME/.config/pushpress"
+WRAPPER_PATH="$WRAPPER_DIR/github-mcp-wrapper.mjs"
+WRAPPER_URL="https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/github-mcp-wrapper.mjs"
+
+# GitHub App credentials (not secrets — just identifiers)
+GITHUB_APP_ID_VAL="3239230"
+GITHUB_INSTALLATION_ID_VAL="120511610"
+
 do_github() {
     echo ""
     echo "── GitHub (PushPress Code) ─────────────────"
     echo ""
     echo "This gives Claude read-only access to PushPress source code."
-    echo "You'll create a personal token — takes about 60 seconds."
+    echo "Uses a shared GitHub App — no personal tokens needed."
     echo ""
-    echo "  1. Go to: https://github.com/settings/personal-access-tokens/new"
-    echo "  2. Token name: \"Claude Cowork\" (or anything you'll recognize)"
-    echo "  3. Expiration: 90 days (you can always re-run this to update)"
-    echo "  4. Resource owner: select \"pushpress\" org"
-    echo "  5. Repository access: \"All repositories\" (or pick specific ones)"
-    echo "  6. Permissions -> Repository permissions:"
-    echo "       Contents: Read-only"
-    echo "       Metadata: Read-only"
-    echo "       Pull requests: Read-only"
-    echo "       (leave everything else as \"No access\")"
-    echo "  7. Click \"Generate token\" and copy it"
+    echo "Get the private key from 1Password:"
+    echo "  Search for \"PushPress Cowork Code Reader\""
+    echo "  Copy the ENTIRE contents (including BEGIN/END lines)"
     echo ""
 
-    local token
-    token=$(ask "Paste your GitHub token (or Enter to skip): ")
-    [ -z "$token" ] && { echo ""; echo "Skipping GitHub. Re-run this installer when you have a token."; return 1; }
+    local pem
+    echo "Paste the private key contents, then press Enter twice:"
+    if [ -t 0 ]; then
+        pem=""
+        while IFS= read -r line; do
+            [ -z "$line" ] && [ -n "$pem" ] && break
+            pem="${pem}${line}\n"
+        done
+    else
+        pem=""
+        while IFS= read -r line </dev/tty; do
+            [ -z "$line" ] && [ -n "$pem" ] && break
+            pem="${pem}${line}\n"
+        done
+    fi
 
-    local result
-    result=$(curl -so /dev/null -w '%{http_code}' --max-time 5 \
-        -H "Authorization: Bearer $token" "https://api.github.com/rate_limit" 2>/dev/null) || result="000"
-    if [ "$result" = "401" ] || [ "$result" = "403" ]; then
-        echo ""
-        echo "Token was rejected ($result). Double-check it and try again."
+    if [ -z "$pem" ]; then
+        echo "Skipping GitHub. Re-run this installer when you have the key."
         return 1
     fi
 
+    # Verify: try generating a token with these credentials
+    echo "Verifying credentials..."
+    local verify_result
+    verify_result=$(GITHUB_APP_ID="$GITHUB_APP_ID_VAL" \
+        GITHUB_INSTALLATION_ID="$GITHUB_INSTALLATION_ID_VAL" \
+        GITHUB_APP_PRIVATE_KEY="$(printf '%b' "$pem")" \
+        node -e "
+            import { createSign } from 'node:crypto';
+            import { request } from 'node:https';
+            const pk = process.env.GITHUB_APP_PRIVATE_KEY;
+            const id = process.env.GITHUB_APP_ID;
+            const iid = process.env.GITHUB_INSTALLATION_ID;
+            function b64u(b){return b.toString('base64').replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');}
+            const now=Math.floor(Date.now()/1000);
+            const h=b64u(Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})));
+            const p=b64u(Buffer.from(JSON.stringify({iat:now-60,exp:now+600,iss:id})));
+            const d=h+'.'+p;
+            const s=createSign('SHA256');s.update(d);
+            const jwt=d+'.'+b64u(s.sign(pk));
+            const r=request({hostname:'api.github.com',path:'/app/installations/'+iid+'/access_tokens',method:'POST',
+                headers:{Authorization:'Bearer '+jwt,Accept:'application/vnd.github+json','User-Agent':'test','X-GitHub-Api-Version':'2022-11-28'}
+            },(res)=>{let b='';res.on('data',c=>b+=c);res.on('end',()=>{console.log(res.statusCode===201?'ok':'fail:'+res.statusCode);});});
+            r.on('error',()=>console.log('fail:network'));r.end();
+        " --input-type=module 2>&1) || verify_result="fail:error"
+
+    if [ "$verify_result" != "ok" ]; then
+        echo ""
+        echo "Credentials didn't work ($verify_result)."
+        echo "Make sure you copied the ENTIRE private key including the"
+        echo "-----BEGIN RSA PRIVATE KEY----- and -----END RSA PRIVATE KEY----- lines."
+        return 1
+    fi
+    echo "Credentials verified."
+
+    # Download the wrapper script
+    mkdir -p "$WRAPPER_DIR"
+    curl -fsSL "$WRAPPER_URL" -o "$WRAPPER_PATH" 2>/dev/null
+    if [ ! -f "$WRAPPER_PATH" ]; then
+        echo "Failed to download wrapper script."
+        return 1
+    fi
+
+    # Build config entry — the wrapper reads env vars and generates tokens
+    local node_cmd="node"
+    [ -n "$NODE_BIN" ] && node_cmd="$NODE_BIN/node"
+
     local entry
     if [ -n "$NODE_BIN" ]; then
-        echo "Using Node from nvm: $NPX_CMD"
         entry=$(node -e "console.log(JSON.stringify({
             command: process.argv[1],
-            args: ['-y', '@modelcontextprotocol/server-github'],
+            args: [process.argv[2]],
             env: {
-                GITHUB_PERSONAL_ACCESS_TOKEN: process.argv[2],
-                PATH: process.argv[3] + ':/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+                GITHUB_APP_ID: process.argv[3],
+                GITHUB_INSTALLATION_ID: process.argv[4],
+                GITHUB_APP_PRIVATE_KEY: process.argv[5],
+                NPX_PATH: process.argv[6],
+                PATH: process.argv[7] + ':/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
             }
-        }))" "$NPX_CMD" "$token" "$NODE_BIN")
+        }))" "$node_cmd" "$WRAPPER_PATH" "$GITHUB_APP_ID_VAL" "$GITHUB_INSTALLATION_ID_VAL" "$(printf '%b' "$pem")" "$NPX_CMD" "$NODE_BIN")
     else
         entry=$(node -e "console.log(JSON.stringify({
-            command: process.argv[1],
-            args: ['-y', '@modelcontextprotocol/server-github'],
+            command: 'node',
+            args: [process.argv[1]],
             env: {
-                GITHUB_PERSONAL_ACCESS_TOKEN: process.argv[2]
+                GITHUB_APP_ID: process.argv[2],
+                GITHUB_INSTALLATION_ID: process.argv[3],
+                GITHUB_APP_PRIVATE_KEY: process.argv[4]
             }
-        }))" "$NPX_CMD" "$token")
+        }))" "$WRAPPER_PATH" "$GITHUB_APP_ID_VAL" "$GITHUB_INSTALLATION_ID_VAL" "$(printf '%b' "$pem")")
     fi
 
     json_set_mcp "github" "$entry"
@@ -412,11 +470,11 @@ if echo ",$keys," | grep -q ",metabase,"; then
 fi
 
 if echo ",$keys," | grep -q ",github,"; then
-    git_tok=$(json_get_env "github" "GITHUB_PERSONAL_ACCESS_TOKEN")
-    if [ -n "$git_tok" ]; then
-        git_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 \
-            -H "Authorization: Bearer $git_tok" "https://api.github.com/rate_limit" 2>/dev/null) || git_code="000"
-        [ "$git_code" = "200" ] && git_status="working" || git_status="not working"
+    git_app_id=$(json_get_env "github" "GITHUB_APP_ID")
+    if [ -n "$git_app_id" ]; then
+        # GitHub App is configured — just check that the env vars exist
+        git_pem=$(json_get_env "github" "GITHUB_APP_PRIVATE_KEY")
+        [ -n "$git_pem" ] && git_status="working" || git_status="not working"
     fi
 fi
 
