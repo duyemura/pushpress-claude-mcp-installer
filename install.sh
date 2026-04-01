@@ -453,12 +453,28 @@ plugin_dir=$(find "$COWORK_SESSIONS" -path "*/cowork_plugins/marketplaces/local-
 uploads_dir=$(find "$COWORK_SESSIONS" -path "*/cowork_plugins/marketplaces/local-desktop-app-uploads" -type d 2>/dev/null | head -1)
 
 if [ -n "$plugin_dir" ] && [ -f "$plugin_dir/.mcp.json" ]; then
-    echo "PushPress Team plugin: already installed"
+    # Get current installed version
+    current_ver=$(node -e "
+        try { const p=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); process.stdout.write(p.version||'unknown'); }
+        catch(e) { process.stdout.write('unknown'); }
+    " "$plugin_dir/.claude-plugin/plugin.json" 2>/dev/null) || current_ver="unknown"
 
-    # Auto-update to latest version
+    echo "PushPress Team plugin: v${current_ver} installed"
+
+    # Download latest and check version
     if curl -fsSL "$PLUGIN_URL" -o /tmp/pushpress-team-update.zip 2>/dev/null; then
-        unzip -qo /tmp/pushpress-team-update.zip -d "$plugin_dir" 2>/dev/null && \
-            echo "(Updated to latest version)" || true
+        # Extract version from the zip without extracting files
+        latest_ver=$(unzip -p /tmp/pushpress-team-update.zip .claude-plugin/plugin.json 2>/dev/null | \
+            node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(d).version||'unknown')}catch(e){process.stdout.write('unknown')}})" 2>/dev/null) || latest_ver="unknown"
+
+        if [ "$current_ver" = "$latest_ver" ]; then
+            echo "Already on the latest version."
+        else
+            echo "Update available: v${current_ver} → v${latest_ver}"
+            unzip -qo /tmp/pushpress-team-update.zip -d "$plugin_dir" 2>/dev/null && \
+                echo "Updated! Restart Claude Desktop to apply." || \
+                echo "Update failed — you can try again later."
+        fi
         rm -f /tmp/pushpress-team-update.zip
     fi
     echo ""
