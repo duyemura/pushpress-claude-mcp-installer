@@ -485,15 +485,6 @@ if echo ",$keys," | grep -q ",metabase,"; then
     fi
 fi
 
-if echo ",$keys," | grep -q ",github,"; then
-    git_app_id=$(json_get_env "github" "GITHUB_APP_ID")
-    if [ -n "$git_app_id" ]; then
-        # GitHub App is configured — just check that the env vars exist
-        git_pem=$(json_get_env "github" "GITHUB_APP_PRIVATE_KEY")
-        [ -n "$git_pem" ] && git_status="working" || git_status="not working"
-    fi
-fi
-
 # Format status display
 format_status() {
     case "$1" in
@@ -505,7 +496,6 @@ format_status() {
 
 gh_display=$(format_status "$gh_status")
 mb_display=$(format_status "$mb_status")
-git_display=$(format_status "$git_status")
 
 # Step 5: Interactive menu
 while true; do
@@ -518,9 +508,6 @@ while true; do
     echo "  [2] Metabase — $mb_display"
     echo "       Query PushPress data and pull live metrics"
     echo ""
-    echo "  [3] GitHub (PushPress Code) — $git_display"
-    echo "       Search and read source code (read-only)"
-    echo ""
     echo "  [A] All PushPress MCPs"
     echo "  [Q] Quit"
     echo ""
@@ -530,7 +517,7 @@ while true; do
 
     case "$choice" in
         ""|Q) echo "Bye!"; exit 0 ;;
-        1|2|3|A) break ;;
+        1|2|A) break ;;
         *) echo "Invalid choice. Pick a number, A, or Q." ;;
     esac
 done
@@ -540,11 +527,9 @@ installed=()
 case "$choice" in
     1) do_gymhappy && installed+=("GymHappy Support") || true ;;
     2) do_metabase && installed+=("Metabase") || true ;;
-    3) do_github && installed+=("GitHub") || true ;;
     A)
         do_gymhappy && installed+=("GymHappy Support") || true
         do_metabase && installed+=("Metabase") || true
-        do_github && installed+=("GitHub") || true
         ;;
 esac
 
