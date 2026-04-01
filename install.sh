@@ -438,30 +438,87 @@ do_metabase() {
 
 PLUGIN_URL="https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/pushpress-team.zip"
 PLUGIN_DEST="$HOME/Desktop/pushpress-team.zip"
+COWORK_SESSIONS="$HOME/Library/Application Support/Claude/local-agent-mode-sessions"
 
 echo ""
 echo "PushPress Cowork Setup"
 echo "======================"
 echo ""
 
-# Step 0: Download the Cowork plugin
-echo "Downloading PushPress Team plugin..."
-if curl -fsSL "$PLUGIN_URL" -o "$PLUGIN_DEST" 2>/dev/null; then
-    echo "Saved to: ~/Desktop/pushpress-team.zip"
-    echo ""
-    echo "  To install: Open Cowork → click Plugins (puzzle icon)"
-    echo "  → Install from file → select pushpress-team.zip on your Desktop"
-    echo ""
-else
-    echo "Could not download plugin (check your internet connection)."
-    echo "You can install it manually later."
-    echo ""
-fi
-
 # Step 1: Ensure Node.js
 ensure_node
 
-# Step 2: Check Claude Desktop config exists
+# Step 2: Check/install the Cowork plugin
+plugin_dir=$(find "$COWORK_SESSIONS" -path "*/cowork_plugins/marketplaces/local-desktop-app-uploads/pushpress-team" -type d 2>/dev/null | head -1)
+uploads_dir=$(find "$COWORK_SESSIONS" -path "*/cowork_plugins/marketplaces/local-desktop-app-uploads" -type d 2>/dev/null | head -1)
+
+if [ -n "$plugin_dir" ] && [ -f "$plugin_dir/.mcp.json" ]; then
+    echo "PushPress Team plugin: already installed"
+
+    # Auto-update to latest version
+    if curl -fsSL "$PLUGIN_URL" -o /tmp/pushpress-team-update.zip 2>/dev/null; then
+        unzip -qo /tmp/pushpress-team-update.zip -d "$plugin_dir" 2>/dev/null && \
+            echo "(Updated to latest version)" || true
+        rm -f /tmp/pushpress-team-update.zip
+    fi
+    echo ""
+
+elif [ -n "$uploads_dir" ]; then
+    # Cowork exists but plugin not installed — auto-install
+    echo "Installing PushPress Team plugin..."
+    if curl -fsSL "$PLUGIN_URL" -o /tmp/pushpress-team-install.zip 2>/dev/null; then
+        mkdir -p "$uploads_dir/pushpress-team"
+        unzip -qo /tmp/pushpress-team-install.zip -d "$uploads_dir/pushpress-team" 2>/dev/null
+
+        # Register in marketplace.json
+        marketplace_json="$uploads_dir/.claude-plugin/marketplace.json"
+        if [ -f "$marketplace_json" ]; then
+            node -e "
+                const fs = require('fs');
+                const p = process.argv[1];
+                const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+                if (!m.plugins.some(x => x.name === 'pushpress-team')) {
+                    m.plugins.push({name:'pushpress-team',version:'1.2.0',source:'./pushpress-team'});
+                    fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+                }
+            " "$marketplace_json" 2>/dev/null || true
+        fi
+
+        rm -f /tmp/pushpress-team-install.zip
+        echo "PushPress Team plugin installed."
+        echo "  (Restart Claude Desktop to activate it.)"
+    else
+        echo "Could not download plugin. Check your internet connection."
+    fi
+    echo ""
+
+else
+    # No Cowork session found — download to Desktop with step-by-step
+    echo "Downloading PushPress Team plugin..."
+    if curl -fsSL "$PLUGIN_URL" -o "$PLUGIN_DEST" 2>/dev/null; then
+        echo "Saved to your Desktop: pushpress-team.zip"
+        echo ""
+        echo "  To install the plugin:"
+        echo ""
+        echo "  1. Open the Claude app (the tan/beige icon in your Dock)"
+        echo "  2. Start a new project:"
+        echo "     - Click the folder icon in the top-left corner"
+        echo "     - Pick any folder (like Documents — it doesn't matter which)"
+        echo "  3. Look for a puzzle piece icon in the left sidebar"
+        echo "  4. Click it, then choose \"Install from file\""
+        echo "  5. Navigate to your Desktop and select pushpress-team.zip"
+        echo "  6. Quit Claude completely (Cmd+Q) and reopen it"
+        echo ""
+        echo "  Then run this installer again to set up your tools."
+        echo ""
+        echo "  Stuck? Screenshot your screen and send it to #support-data on Slack."
+    else
+        echo "Could not download plugin. Check your internet connection."
+    fi
+    echo ""
+fi
+
+# Step 3: Check Claude Desktop config exists
 if [ ! -f "$CONFIG" ]; then
     echo "Claude Desktop config not found at:"
     echo "  $CONFIG"
