@@ -423,11 +423,27 @@ do_metabase() {
 
 # ── Main ────────────────────────────────────────────────────────────
 
+PLUGIN_URL="https://raw.githubusercontent.com/duyemura/pushpress-claude-mcp-installer/main/pushpress-team.zip"
+PLUGIN_DEST="$HOME/Desktop/pushpress-team.zip"
+
 echo ""
-echo "PushPress MCP Installer"
-echo "========================"
-echo "Adds PushPress tools to Claude Desktop."
+echo "PushPress Cowork Setup"
+echo "======================"
 echo ""
+
+# Step 0: Download the Cowork plugin
+echo "Downloading PushPress Team plugin..."
+if curl -fsSL "$PLUGIN_URL" -o "$PLUGIN_DEST" 2>/dev/null; then
+    echo "Saved to: ~/Desktop/pushpress-team.zip"
+    echo ""
+    echo "  To install: Open Cowork → click Plugins (puzzle icon)"
+    echo "  → Install from file → select pushpress-team.zip on your Desktop"
+    echo ""
+else
+    echo "Could not download plugin (check your internet connection)."
+    echo "You can install it manually later."
+    echo ""
+fi
 
 # Step 1: Ensure Node.js
 ensure_node
@@ -541,8 +557,10 @@ fi
 # Step 7: Done
 echo ""
 echo "========================================"
-echo "Installed: ${installed[*]}"
+echo "MCPs installed: ${installed[*]}"
 echo ""
-echo "Restart Claude Desktop for changes to take effect."
-echo "(Quit the app completely, then reopen it.)"
+echo "Next steps:"
+echo "  1. Restart Claude Desktop (quit completely, then reopen)"
+echo "  2. If you haven't yet: install the plugin in Cowork"
+echo "     (Open Cowork → Plugins → pushpress-team.zip on your Desktop)"
 echo "========================================"
